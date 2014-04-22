@@ -4,6 +4,7 @@ var crypto = require('./crypto')
 var convert = require('./convert')
 var Network = require('./network')
 var Opcode = require('./opcode')
+var ECDSA = require('./ecdsa')
 
 function Script(data) {
   this.buffer = data || []
@@ -445,19 +446,45 @@ Script.createP2SHScriptSig = function(scriptSig, scriptPubKey) {
 }
 
 // [signatures ...] {m [pubKeys ...] n OP_CHECKSIG}
-Script.createP2SHMultisigScriptSig = function(signatures, scriptPubKey) {
+Script.createP2SHMultisigScriptSig = function(signatures, scriptPubKey, hash) {
   assert(isMultisig.call(scriptPubKey))
-
   var m = scriptPubKey.chunks[0]
+  var sigs = []
+
+  //verify sigs and make sure they are in correct order
+  if(hash) {
+      if(signatures.length >1) {
+          var pubKeyList = scriptListPubkey(scriptPubKey)
+          for(var y in sigsList) {
+              for(var x in signatures) {
+                  if(ECDSA.verify(hash,convert.hexToBytes(signatures[x]),convert.hexToBytes(pubKeyList[y]))){
+                      sigs.push(signatures[x])
+                  }
+              }
+          }
+      }
+  } else {
+      sigs = signatures.slice(0)
+  }
+
   var k = m - (Opcode.map.OP_1 - 1)
   assert(k <= signatures.length, 'Not enough signatures provided')
 
-  var scriptSig = Script.createMultisigScriptSig(signatures)
+  var scriptSig = Script.createMultisigScriptSig(sigs)
   return Script.createP2SHScriptSig(scriptSig, scriptPubKey)
 }
 
 Script.prototype.clone = function() {
   return new Script(this.buffer)
+}
+
+
+function scriptListPubkey(redeemScript){
+    var r = [];
+    for(var i=1;i<redeemScript.chunks.length-2;i++){
+        r.push(convert.bytesToHex(redeemScript.chunks[i]));
+    }
+    return r;
 }
 
 module.exports = Script

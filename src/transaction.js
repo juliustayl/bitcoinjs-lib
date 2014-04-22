@@ -372,7 +372,7 @@ Transaction.prototype.p2shsign = function(index, script, key, type) {
 Transaction.prototype.multisign = Transaction.prototype.p2shsign
 
 Transaction.prototype.applyMultisigs = function(index, script, sigs/*, type*/) {
-  this.ins[index].script = Script.createMultiSigInputScript(sigs, script)
+  this.ins[index].script = Script.createP2SHMultisigScriptSig(sigs, script)
 }
 
 Transaction.prototype.validateSig = function(index, script, sig, pub) {

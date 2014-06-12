@@ -5,13 +5,17 @@
 // Merged Buffer refactorings from base58-native by Stephen Pair
 // Copyright (c) 2013 BitPay Inc
 
+<<<<<<< HEAD
+=======
+var assert = require('assert')
+>>>>>>> ad9a73a81b68499fe2dc07bd30c1c546e81f504a
 var BigInteger = require('bigi')
 
 var ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
 var ALPHABET_BUF = new Buffer(ALPHABET, 'ascii')
 var ALPHABET_MAP = {}
 for(var i = 0; i < ALPHABET.length; i++) {
-  ALPHABET_MAP[ALPHABET[i]] = BigInteger.valueOf(i)
+  ALPHABET_MAP[ALPHABET.charAt(i)] = BigInteger.valueOf(i)
 }
 var BASE = BigInteger.valueOf(58)
 
@@ -20,7 +24,7 @@ function encode(buffer) {
   var result = new Buffer(buffer.length << 1)
 
   var i = result.length - 1
-  while (bi.compareTo(BigInteger.ZERO) > 0) {
+  while (bi.signum() > 0) {
     var remainder = bi.mod(BASE)
     bi = bi.divide(BASE)
 
@@ -42,24 +46,28 @@ function encode(buffer) {
 function decode(string) {
   if (string.length === 0) return new Buffer(0)
 
-  var num = BigInteger.ZERO.clone()
+  var num = BigInteger.ZERO
 
   for (var i = 0; i < string.length; i++) {
     num = num.multiply(BASE)
-    num = num.add(ALPHABET_MAP[string.charAt(i)])
+
+    var figure = ALPHABET_MAP[string.charAt(i)]
+    assert.notEqual(figure, undefined, 'Non-base58 character')
+
+    num = num.add(figure)
   }
 
   // deal with leading zeros
-  var i = 0
-  while ((i < string.length) && (string[i] === ALPHABET[0])) {
-    i++
+  var j = 0
+  while ((j < string.length) && (string[j] === ALPHABET[0])) {
+    j++
   }
 
   var buffer = num.toBuffer()
-  var leadz = new Buffer(i)
-  leadz.fill(0)
+  var leadingZeros = new Buffer(j)
+  leadingZeros.fill(0)
 
-  return Buffer.concat([leadz, buffer])
+  return Buffer.concat([leadingZeros, buffer])
 }
 
 module.exports = {

@@ -9,7 +9,28 @@
     "client",
     "library"
   ],
-  "author": "Stefan Thomas <justmoon@members.fsf.org> (http://www.justmoon.net)",
+  "contributors": [
+    {
+      "name": "Daniel Cousens",
+      "email": "bitcoin@dcousens.com",
+      "url": "http://dcousens.com"
+    },
+    {
+      "name": "Kyle Drake",
+      "email": "kyle@kyledrake.net",
+      "url": "http://kyledrake.net/"
+    },
+    {
+      "name": "Wei Lu",
+      "email": "luwei.here@gmail.com",
+      "url": "http://weilu.github.io/"
+    },
+    {
+      "name": "Stefan Thomas",
+      "email": "justmoon@members.fsf.org",
+      "url": "http://www.justmoon.net"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/bitcoinjs/bitcoinjs-lib.git"
@@ -18,10 +39,12 @@
     "mocha": "1.18.2",
     "istanbul": "0.1.30",
     "uglify-js": "2.4.13",
-    "node-browserify": "https://github.com/substack/node-browserify/tarball/master",
     "sinon": "1.9.0",
     "coveralls": "~2.10.0",
-    "mocha-lcov-reporter": "0.0.1"
+    "mocha-lcov-reporter": "0.0.1",
+    "helloblock-js": "^0.2.1",
+    "browserify": "~4.1.5",
+    "jshint": "2.5.1"
   },
   "testling": {
     "browsers": [
@@ -37,13 +60,22 @@
     "files": "test/*.js"
   },
   "scripts": {
-    "test": "./node_modules/.bin/istanbul test ./node_modules/.bin/_mocha -- --reporter list test/*.js",
+    "unit": "./node_modules/.bin/istanbul test ./node_modules/.bin/_mocha -- --reporter list `find test -maxdepth 1 -not -type d`",
+    "test": "npm run-script unit",
+    "integration": "./node_modules/.bin/_mocha --reporter list test/integration/*.js",
+    "jshint": "./node_modules/.bin/jshint --config jshint.json src/*.js ; true",
     "coverage": "./node_modules/.bin/istanbul cover ./node_modules/.bin/_mocha -- --reporter list test/*.js",
+    "coveralls": "npm run-script coverage && node ./node_modules/.bin/coveralls < coverage/lcov.info",
     "compile": "./node_modules/.bin/browserify ./src/index.js -s Bitcoin | ./node_modules/.bin/uglifyjs > bitcoinjs-min.js"
   },
   "dependencies": {
+<<<<<<< HEAD
     "bigi": "1.0.0",
+=======
+    "bigi": "1.1.0",
+>>>>>>> ad9a73a81b68499fe2dc07bd30c1c546e81f504a
     "crypto-js": "3.1.2-3",
+    "ecurve": "0.7.0",
     "secure-random": "0.2.1"
   }
 }

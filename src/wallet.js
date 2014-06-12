@@ -1,13 +1,13 @@
-var convert = require('./convert')
-var Transaction = require('./transaction').Transaction
-var HDNode = require('./hdwallet.js')
+var assert = require('assert')
+var networks = require('./networks')
 var rng = require('secure-random')
 
-function Wallet(seed, options) {
-  if (!(this instanceof Wallet)) { return new Wallet(seed, options); }
+var Address = require('./address')
+var HDNode = require('./hdnode')
+var Transaction = require('./transaction').Transaction
 
-  var options = options || {}
-  var network = options.network || 'bitcoin'
+function Wallet(seed, network) {
+  network = network || networks.bitcoin
 
   // Stored in a closure to make accidental serialization less likely
   var masterkey = null
@@ -20,17 +20,20 @@ function Wallet(seed, options) {
   this.addresses = []
   this.changeAddresses = []
 
+  // Dust value
+  this.dustThreshold = 5430
+
   // Transaction output data
   this.outputs = {}
 
   // Make a new master key
-  this.newMasterKey = function(seed, network) {
-    if (!seed) seed = rng(32, { array: true });
-    masterkey = new HDNode(seed, network)
+  this.newMasterKey = function(seed) {
+    seed = seed || new Buffer(rng(32))
+    masterkey = HDNode.fromSeedBuffer(seed, network)
 
-    // HD first-level child derivation method should be private
+    // HD first-level child derivation method should be hardened
     // See https://bitcointalk.org/index.php?topic=405179.msg4415254#msg4415254
-    accountZero = masterkey.derivePrivate(0)
+    accountZero = masterkey.deriveHardened(0)
     externalAccount = accountZero.derive(0)
     internalAccount = accountZero.derive(1)
 
@@ -39,8 +42,8 @@ function Wallet(seed, options) {
 
     me.outputs = {}
   }
-  this.newMasterKey(seed, network)
 
+  this.newMasterKey(seed)
 
   this.generateAddress = function() {
     var key = externalAccount.derive(this.addresses.length)
@@ -83,23 +86,11 @@ function Wallet(seed, options) {
     this.outputs = outputs
   }
 
-  this.setUnspentOutputsAsync = function(utxo, callback) {
-    var error = null
-    try {
-      this.setUnspentOutputs(utxo)
-    } catch(err) {
-      error = err
-    } finally {
-      process.nextTick(function(){ callback(error) })
-    }
-  }
-
   function outputToUnspentOutput(output){
     var hashAndIndex = output.receive.split(":")
 
     return {
       hash: hashAndIndex[0],
-      hashLittleEndian: convert.reverseEndian(hashAndIndex[0]),
       outputIndex: parseInt(hashAndIndex[1]),
       address: output.address,
       value: output.value
@@ -107,7 +98,7 @@ function Wallet(seed, options) {
   }
 
   function unspentOutputToOutput(o) {
-    var hash = o.hash || convert.reverseEndian(o.hashLittleEndian)
+    var hash = o.hash
     var key = hash + ":" + o.outputIndex
     return {
       receive: key,
@@ -119,8 +110,8 @@ function Wallet(seed, options) {
   function validateUnspentOutput(uo) {
     var missingField
 
-    if (isNullOrUndefined(uo.hash) && isNullOrUndefined(uo.hashLittleEndian)) {
-      missingField = "hash(or hashLittleEndian)"
+    if (isNullOrUndefined(uo.hash)) {
+      missingField = "hash"
     }
 
     var requiredKeys = ['outputIndex', 'address', 'value']
@@ -136,7 +127,7 @@ function Wallet(seed, options) {
         'A valid unspent output must contain'
       ]
       message.push(requiredKeys.join(', '))
-      message.push("and hash(or hashLittleEndian)")
+      message.push("and hash")
       throw new Error(message.join(' '))
     }
   }
@@ -146,12 +137,20 @@ function Wallet(seed, options) {
   }
 
   this.processTx = function(tx) {
-    var txhash = convert.bytesToHex(tx.getHash())
+    var txhash = tx.getHash()
 
     tx.outs.forEach(function(txOut, i){
-      var address = txOut.address.toString()
+      var address
+
+      try {
+        address = Address.fromScriptPubKey(txOut.script, network).toString()
+      } catch(e) {
+        if (!(e.message.match(/has no matching Address/))) throw e
+      }
+
       if (isMyAddress(address)) {
-        var output = txhash+':'+i
+        var output = txhash + ':' + i
+
         me.outputs[output] = {
           receive: output,
           value: txOut.value,
@@ -162,78 +161,56 @@ function Wallet(seed, options) {
 
     tx.ins.forEach(function(txIn, i){
       var op = txIn.outpoint
-      var o = me.outputs[op.hash+':'+op.index]
+
+      var o = me.outputs[op.hash + ':' + op.index]
       if (o) {
-        o.spend = txhash+':'+i
+        o.spend = txhash + ':' + i
       }
     })
   }
 
-  this.createTx = function(to, value, fixedFee) {
-    checkDust(value)
+  this.createTx = function(to, value, fixedFee, changeAddress) {
+    assert(value > this.dustThreshold, value + ' must be above dust threshold (' + this.dustThreshold + ' Satoshis)')
+
+    var utxos = getCandidateOutputs(value)
+    var accum = 0
+    var subTotal = value
 
     var tx = new Transaction()
     tx.addOutput(to, value)
 
-    var utxo = getCandidateOutputs(value)
-    var totalInValue = 0
-    for(var i=0; i<utxo.length; i++){
-      var output = utxo[i]
-      tx.addInput(output.receive)
+    for (var i = 0; i < utxos.length; ++i) {
+      var utxo = utxos[i]
 
-      totalInValue += output.value
-      if(totalInValue < value) continue
+      tx.addInput(utxo.receive)
+      accum += utxo.value
 
       var fee = fixedFee == undefined ? estimateFeePadChangeOutput(tx) : fixedFee
-      if(totalInValue < value + fee) continue
 
-      var change = totalInValue - value - fee
-      if(change > 0 && !isDust(change)) {
-        tx.addOutput(getChangeAddress(), change)
+      subTotal = value + fee
+      if (accum >= subTotal) {
+        var change = accum - subTotal
+
+        if (change > this.dustThreshold) {
+          tx.addOutput(changeAddress || getChangeAddress(), change)
+        }
+
+        break
       }
-      break
     }
 
-    checkInsufficientFund(totalInValue, value, fee)
+    assert(accum >= subTotal, 'Not enough funds (incl. fee): ' + accum + ' < ' + subTotal)
 
     this.sign(tx)
-
     return tx
   }
 
-  this.createTxAsync = function(to, value, fixedFee, callback){
-    if(fixedFee instanceof Function) {
-      callback = fixedFee
-      fixedFee = undefined
-    }
-    var tx = null
-    var error = null
-
-    try {
-      tx = this.createTx(to, value, fixedFee)
-    } catch(err) {
-      error = err
-    } finally {
-      process.nextTick(function(){ callback(error, tx) })
-    }
-  }
-
-  this.dustThreshold = 5430
-  function isDust(amount) {
-    return amount <= me.dustThreshold
-  }
-
-  function checkDust(value){
-    if (isNullOrUndefined(value) || isDust(value)) {
-      throw new Error("Value must be above dust threshold")
-    }
-  }
-
-  function getCandidateOutputs(value){
+  function getCandidateOutputs() {
     var unspent = []
-    for (var key in me.outputs){
+
+    for (var key in me.outputs) {
       var output = me.outputs[key]
-      if(!output.spend) unspent.push(output)
+      if (!output.spend) unspent.push(output)
     }
 
     var sortByValueDesc = unspent.sort(function(o1, o2){
@@ -254,18 +231,11 @@ function Wallet(seed, options) {
     return me.changeAddresses[me.changeAddresses.length - 1]
   }
 
-  function checkInsufficientFund(totalInValue, value, fee) {
-    if(totalInValue < value + fee) {
-      throw new Error('Not enough money to send funds including transaction fee. Have: ' +
-                      totalInValue + ', needed: ' + (value + fee))
-    }
-  }
-
   this.sign = function(tx) {
     tx.ins.forEach(function(inp,i) {
       var output = me.outputs[inp.outpoint.hash + ':' + inp.outpoint.index]
       if (output) {
-        tx.sign(i, me.getPrivateKeyForAddress(output.address))
+        tx.sign(i, me.getPrivateKeyForAddress(output.address), false)
       }
     })
     return tx
@@ -277,11 +247,11 @@ function Wallet(seed, options) {
   this.getExternalAccount = function() { return externalAccount }
 
   this.getPrivateKey = function(index) {
-    return externalAccount.derive(index).priv
+    return externalAccount.derive(index).privKey
   }
 
   this.getInternalPrivateKey = function(index) {
-    return internalAccount.derive(index).priv
+    return internalAccount.derive(index).privKey
   }
 
   this.getPrivateKeyForAddress = function(address) {

@@ -1,46 +1,34 @@
 var assert = require('assert')
-var base58check = require('../').base58check
-var fixtures = require('./fixtures/base58check')
+var base58check = require('../src/base58check')
 
-function b2h(b) { return new Buffer(b).toString('hex') }
+var fixtures = require('./fixtures/base58check.json')
+
 function h2b(h) { return new Buffer(h, 'hex') }
 
 describe('base58check', function() {
   describe('decode', function() {
-    it('can decode Bitcoin core test data', function() {
-      fixtures.valid.forEach(function(f) {
+    fixtures.valid.forEach(function(f) {
+      it('can decode ' + f.string, function() {
         var actual = base58check.decode(f.string)
-        var expected = {
-          version: f.decode.version,
-          payload: h2b(f.decode.payload),
-          checksum: h2b(f.decode.checksum)
-        }
+        var expected = h2b(f.payload)
 
         assert.deepEqual(actual, expected)
       })
     })
 
     fixtures.invalid.forEach(function(f) {
-      it('throws on ' + f.description, function() {
+      it('throws on ' + f, function() {
         assert.throws(function() {
-          base58check.decode(f.string)
-        })
-      })
-    })
-
-    it('throws on [invalid] Bitcoin core test data', function() {
-      fixtures.invalid2.forEach(function(f) {
-        assert.throws(function() {
-          base58check.decode(f.string)
-        })
+          base58check.decode(f)
+        }, /Invalid checksum/)
       })
     })
   })
 
   describe('encode', function() {
-    it('can encode Bitcoin core test data', function() {
-      fixtures.valid.forEach(function(f) {
-        var actual = base58check.encode(h2b(f.decode.payload), f.decode.version)
+    fixtures.valid.forEach(function(f) {
+      it('can encode ' + f.string, function() {
+        var actual = base58check.encode(h2b(f.payload))
         var expected = f.string
 
         assert.strictEqual(actual, expected)
@@ -48,4 +36,3 @@ describe('base58check', function() {
     })
   })
 })
-

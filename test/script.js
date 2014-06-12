@@ -1,34 +1,18 @@
 var assert = require('assert')
-var crypto = require('..').crypto
-var network = require('..').network
+var crypto = require('../src/crypto')
+var networks = require('../src/networks')
+var opcodes = require('../src/opcodes')
 
-var Address = require('../src/address.js')
-var Script = require('../src/script.js')
+var Address = require('../src/address')
+var ECPubKey = require('../src/ecpubkey')
+var Script = require('../src/script')
+
+var fixtures = require('./fixtures/script.json')
 
 function b2h(b) { return new Buffer(b).toString('hex') }
 function h2b(h) { return new Buffer(h, 'hex') }
 
 describe('Script', function() {
-  var p2shScriptPubKey, pubkeyScriptPubkey, addressScriptSig
-
-  beforeEach(function(){
-    p2shScriptPubKey = "a914e8c300c87986efa84c37c0519929019ef86eb5b487"
-    pubkeyScriptPubKey = "76a9145a3acbc7bbcc97c5ff16f5909c9d7d3fadb293a888ac"
-    addressScriptSig = "48304502206becda98cecf7a545d1a640221438ff8912d9b505ede67e0138485111099f696022100ccd616072501310acba10feb97cecc918e21c8e92760cd35144efec7622938f30141040cd2d2ce17a1e9b2b3b2cb294d40eecf305a25b7e7bfdafae6bb2639f4ee399b3637706c3d377ec4ab781355add443ae864b134c5e523001c442186ea60f0eb8"
-
-    // txid: 09dd94f2c85262173da87a745a459007bb1eed6eeb6bfa238a0cd91a16cf7790
-    validMultisigScript = '5121032487c2a32f7c8d57d2a93906a6457afd00697925b0e6e145d89af6d3bca330162102308673d16987eaa010e540901cc6fe3695e758c19f46ce604e174dac315e685a52ae'
-
-    // txid: 5e9be7fb36ee49ce84bee4c8ef38ad0efc0608b78dae1c2c99075297ef527890
-    opreturnScript = '6a2606deadbeef03f895a2ad89fb6d696497af486cb7c644a27aa568c7a18dd06113401115185474'
-
-    // asm: "0 0 0 OP_CHECKMULTISIG"
-    invalidMultisigScript = '000000ae'
-
-    // txid: a4bfa8ab6435ae5f25dae9d89e4eb67dfa94283ca751f393c1ddc5a837bbc31b
-    nonStandardScript = 'aa206fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d619000000000087'
-  })
-
   describe('constructor', function() {
     it('works for a byte array', function() {
       assert.ok(new Script([]))
@@ -39,69 +23,86 @@ describe('Script', function() {
     })
 
     it('throws an error when input is not an array', function() {
-      assert.throws(function(){ new Script({}) })
+      assert.throws(function(){ new Script({}) }, /Expected Array, got/)
     })
   })
 
-  describe('getOutType', function() {
-    it('supports p2sh', function() {
-      var script = Script.fromHex(p2shScriptPubKey)
-      assert.equal(script.getOutType(), 'scripthash')
+  describe('fromHex/toHex', function() {
+    fixtures.valid.forEach(function(f) {
+      it('decodes/encodes ' + f.description, function() {
+        assert.equal(Script.fromHex(f.hex).toHex(), f.hex)
+      })
     })
+  })
 
-    it('supports pubkeyhash', function() {
-      var script = Script.fromHex(pubkeyScriptPubKey)
-      assert.equal(script.getOutType(), 'pubkeyhash')
-    })
+  describe('getHash', function() {
+    fixtures.valid.forEach(function(f) {
+      it('produces a HASH160 of \"' + f.asm + '\"', function() {
+        var script = Script.fromHex(f.hex)
 
-    it('supports multisig', function() {
-      var script = Script.fromHex(validMultisigScript)
-      assert.equal(script.getOutType(), 'multisig')
-    })
-
-    it('supports null_data', function() {
-      var script = Script.fromHex(opreturnScript)
-      assert.equal(script.getOutType(), 'nulldata')
-    })
-
-    it('supports nonstandard script', function() {
-      var script = Script.fromHex(nonStandardScript)
-      assert.equal(script.getOutType(), 'nonstandard')
-    })
-
-    it('identifies invalid multisig script as nonstandard', function() {
-      var script = Script.fromHex(invalidMultisigScript)
-      assert.equal(script.getOutType(), 'nonstandard')
+        assert.equal(script.getHash().toString('hex'), f.hash)
+      })
     })
   })
 
   describe('getInType', function() {
-    it('works for address', function() {
-      var script = Script.fromHex(addressScriptSig)
-      assert.equal(script.getInType(), 'pubkeyhash')
+    fixtures.valid.forEach(function(f) {
+      if (!f.scriptPubKey) {
+        it('supports ' + f.description, function() {
+          var script = Script.fromHex(f.hex)
+
+          assert.equal(script.getInType(), f.type)
+        })
+      }
     })
   })
 
-  describe('getToAddress', function() {
-    it('works for p2sh type output', function() {
-      var script = Script.fromHex(p2shScriptPubKey)
-      assert.equal(script.getToAddress().toString(), '3NukJ6fYZJ5Kk8bPjycAnruZkE5Q7UW7i8')
-    })
+  describe('getOutType', function() {
+    fixtures.valid.forEach(function(f) {
+      if (f.scriptPubKey) {
+        it('supports ' + f.description, function() {
+          var script = Script.fromHex(f.hex)
 
-    it('works for pubkey type output', function() {
-      var script = Script.fromHex(pubkeyScriptPubKey)
-      assert.equal(script.getToAddress().toString(), '19E6FV3m3kEPoJD5Jz6dGKdKwTVvjsWUvu')
-    })
-  })
-
-  describe('getFromAddress', function() {
-    it('works for address type input', function() {
-      var script = Script.fromHex(addressScriptSig)
-      assert.equal(script.getFromAddress().toString(), '1BBjuhF2jHxu7tPinyQGCuaNhEs6f5u59u')
+          assert.equal(script.getOutType(), f.type)
+        })
+      }
     })
   })
 
-  describe('2-of-3 Multi-Signature', function() {
+  describe('pay-to-pubKeyHash', function() {
+    it('matches the test data', function() {
+      // FIXME: bad
+      var f = fixtures.valid[2]
+      var address = Address.fromBase58Check('19E6FV3m3kEPoJD5Jz6dGKdKwTVvjsWUvu')
+      var script = Script.createPubKeyHashScriptPubKey(address.hash)
+
+      assert.equal(script.toHex(), f.hex)
+    })
+  })
+
+  describe('pay-to-pubkey', function() {
+    it('matches the test data', function() {
+      // FIXME: bad
+      var f = fixtures.valid[0]
+      var pubKey = ECPubKey.fromHex(f.pubKey)
+      var script = Script.createPubKeyScriptPubKey(pubKey)
+
+      assert.equal(script.toHex(), f.hex)
+    })
+  })
+
+  describe('pay-to-scriptHash', function() {
+    it('matches the test data', function() {
+      // FIXME: bad
+      var f = fixtures.valid[1]
+      var address = Address.fromBase58Check('3NukJ6fYZJ5Kk8bPjycAnruZkE5Q7UW7i8')
+      var script = Script.createP2SHScriptPubKey(address.hash)
+
+      assert.equal(script.toHex(), f.hex)
+    })
+  })
+
+  describe('2-of-3 Multi-Signature scriptPubKey', function() {
     var pubKeys
 
     beforeEach(function() {
@@ -109,16 +110,22 @@ describe('Script', function() {
         '02ea1297665dd733d444f31ec2581020004892cdaaf3dd6c0107c615afb839785f',
         '02fab2dea1458990793f56f42e4a47dbf35a12a351f26fa5d7e0cc7447eaafa21f',
         '036c6802ce7e8113723dd92cdb852e492ebb157a871ca532c3cb9ed08248ff0e19'
-      ].map(h2b)
+      ].map(ECPubKey.fromHex)
     })
 
     it('should create valid redeemScript', function() {
-      var redeemScript = Script.createMultisigOutputScript(2, pubKeys)
+      var redeemScript = Script.createMultisigScriptPubKey(2, pubKeys)
 
-      var hash160 = crypto.hash160(redeemScript.buffer)
-      var multisigAddress = new Address(hash160, network.bitcoin.scriptHash)
+      var hash160 = crypto.hash160(new Buffer(redeemScript.buffer))
+      var multisigAddress = new Address(hash160, networks.bitcoin.scriptHash)
 
       assert.equal(multisigAddress.toString(), '32vYjxBb7pHJJyXgNk8UoK3BdRDxBzny2v')
+    })
+
+    it('should throw on not enough pubKeys provided', function() {
+      assert.throws(function() {
+        Script.createMultisigScriptPubKey(4, pubKeys)
+      }, /Not enough pubKeys provided/)
     })
   })
 
@@ -126,7 +133,7 @@ describe('Script', function() {
     var pubKeys = [
       '02359c6e3f04cefbf089cf1d6670dc47c3fb4df68e2bad1fa5a369f9ce4b42bbd1',
       '0395a9d84d47d524548f79f435758c01faec5da2b7e551d3b8c995b7e06326ae4a'
-    ].map(h2b)
+    ].map(ECPubKey.fromHex)
     var signatures = [
       '304402207515cf147d201f411092e6be5a64a6006f9308fad7b2a8fdaab22cd86ce764c202200974b8aca7bf51dbf54150d3884e1ae04f675637b926ec33bf75939446f6ca2801',
       '3045022100ef253c1faa39e65115872519e5f0a33bbecf430c0f35cf562beabbad4da24d8d02201742be8ee49812a73adea3007c9641ce6725c32cd44ddb8e3a3af460015d140501'
@@ -134,10 +141,51 @@ describe('Script', function() {
     var expected = '0047304402207515cf147d201f411092e6be5a64a6006f9308fad7b2a8fdaab22cd86ce764c202200974b8aca7bf51dbf54150d3884e1ae04f675637b926ec33bf75939446f6ca2801483045022100ef253c1faa39e65115872519e5f0a33bbecf430c0f35cf562beabbad4da24d8d02201742be8ee49812a73adea3007c9641ce6725c32cd44ddb8e3a3af460015d14050147522102359c6e3f04cefbf089cf1d6670dc47c3fb4df68e2bad1fa5a369f9ce4b42bbd1210395a9d84d47d524548f79f435758c01faec5da2b7e551d3b8c995b7e06326ae4a52ae'
 
     it('should create a valid P2SH multisig scriptSig', function() {
-      var redeemScript = Script.createMultisigOutputScript(2, pubKeys)
-      var actual = Script.createP2SHMultisigScriptSig(signatures, redeemScript)
+      var redeemScript = Script.createMultisigScriptPubKey(2, pubKeys)
+      var redeemScriptSig = Script.createMultisigScriptSig(signatures)
 
-      assert.equal(b2h(actual.buffer), expected)
+      var scriptSig = Script.createP2SHScriptSig(redeemScriptSig, redeemScript)
+
+      assert.equal(b2h(scriptSig.buffer), expected)
+    })
+
+    it('should throw on not enough signatures', function() {
+      var redeemScript = Script.createMultisigScriptPubKey(2, pubKeys)
+
+      assert.throws(function() {
+        Script.createMultisigScriptSig(signatures.slice(1), redeemScript)
+      }, /Not enough signatures provided/)
+    })
+  })
+
+  describe('fromChunks', function() {
+    it('should match expected behaviour', function() {
+      var hash = new Buffer(32)
+      var script = Script.fromChunks([
+        opcodes.OP_HASH160,
+        hash,
+        opcodes.OP_EQUAL
+      ])
+
+      assert.deepEqual(script, Script.createP2SHScriptPubKey(hash))
+    })
+  })
+
+  describe('without', function() {
+    var hex = 'a914e8c300c87986efa94c37c0519929019ef86eb5b487'
+    var script = Script.fromHex(hex)
+
+    it('should return a script without the given value', function() {
+      var subScript = script.without(opcodes.OP_HASH160)
+
+      assert.equal(subScript.toHex(), '14e8c300c87986efa94c37c0519929019ef86eb5b487')
+    })
+
+    it('shouldnt mutate the original script', function() {
+      var subScript = script.without(opcodes.OP_EQUAL)
+
+      assert.notEqual(subScript.toHex(), hex)
+      assert.equal(script.toHex(), hex)
     })
   })
 })

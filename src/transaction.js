@@ -1,26 +1,34 @@
 // FIXME: To all ye that enter here, be weary of Buffers, Arrays and Hex interchanging between the outpoints
 
 var assert = require('assert')
+<<<<<<< HEAD
 var Address = require('./address')
 var BigInteger = require('bigi')
 var Script = require('./script')
 var convert = require('./convert')
+=======
+var bufferutils = require('./bufferutils')
+>>>>>>> ad9a73a81b68499fe2dc07bd30c1c546e81f504a
 var crypto = require('./crypto')
-var ECKey = require('./eckey').ECKey
 var ecdsa = require('./ecdsa')
-var Network = require('./network')
+var opcodes = require('./opcodes')
 
-var Transaction = function (doc) {
+var Address = require('./address')
+var Script = require('./script')
+var ECKey = require('./eckey')
+
+var DEFAULT_SEQUENCE = 0xffffffff
+
+function Transaction(doc) {
   if (!(this instanceof Transaction)) { return new Transaction(doc) }
   this.version = 1
   this.locktime = 0
   this.ins = []
   this.outs = []
-  this.defaultSequence = [255, 255, 255, 255] // 0xFFFFFFFF
 
   if (doc) {
     if (typeof doc == "string" || Array.isArray(doc)) {
-      doc = Transaction.deserialize(doc)
+      doc = Transaction.fromBuffer(doc)
     }
 
     if (doc.hash) this.hash = doc.hash;
@@ -57,24 +65,26 @@ var Transaction = function (doc) {
 Transaction.prototype.addInput = function (tx, outIndex) {
   if (arguments[0] instanceof TransactionIn) {
     this.ins.push(arguments[0])
+    return
   }
-  else if (arguments[0].length > 65) {
-    var args = arguments[0].split(':')
-    return this.addInput(args[0], args[1])
-  }
-  else {
-    var hash = typeof tx === "string" ? tx : tx.hash
-    hash = Array.isArray(hash) ? convert.bytesToHex(hash) : hash
 
-    this.ins.push(new TransactionIn({
-      outpoint: {
-        hash: hash,
-        index: outIndex
-      },
-      script: new Script(),
-      sequence: this.defaultSequence
-    }))
+  var hash
+  if (arguments[0].length > 65) {
+    var args = arguments[0].split(':')
+    hash = args[0]
+    outIndex = parseInt(args[1])
+
+  } else {
+    hash = typeof tx === "string" ? tx : tx.hash
   }
+
+  this.ins.push(new TransactionIn({
+    outpoint: {
+      hash: hash,
+      index: outIndex
+    },
+    script: new Script()
+  }))
 }
 
 /**
@@ -83,88 +93,107 @@ Transaction.prototype.addInput = function (tx, outIndex) {
  * Can be called with:
  *
  * i) An existing TransactionOut object
- * ii) An address object or an address and a value
+ * ii) An address object or a string address, and a value
  * iii) An address:value string
- * iv) Either ii), iii) with an optional network argument
  *
  * FIXME: This is a bit convoluted
  */
-Transaction.prototype.addOutput = function (address, value, network) {
+Transaction.prototype.addOutput = function (address, value) {
   if (arguments[0] instanceof TransactionOut) {
     this.outs.push(arguments[0])
     return
   }
 
-  if (arguments[0].indexOf(':') >= 0) {
-    network = value
-
-    var args = arguments[0].split(':')
-    address = args[0]
-    value = parseInt(args[1])
-  }
-
-  network = network || Network.bitcoin
-
   if (typeof address === 'string') {
+    if (arguments[0].indexOf(':') >= 0) {
+      var args = arguments[0].split(':')
+      address = args[0]
+      value = parseInt(args[1])
+    }
+
     address = Address.fromBase58Check(address)
   }
 
   this.outs.push(new TransactionOut({
     value: value,
-    script: Script.createOutputScript(address, network)
+    script: address.toScriptPubKey(),
+    address: address // TODO: Remove me
   }))
 }
 
-/**
- * Serialize this transaction.
- *
- * Returns the transaction as a byte array in the standard Bitcoin binary
- * format. This method is byte-perfect, i.e. the resulting byte array can
- * be hashed to get the transaction's standard Bitcoin hash.
- */
-Transaction.prototype.serialize = function () {
-  var buffer = []
-  buffer = buffer.concat(convert.numToBytes(parseInt(this.version), 4))
-  buffer = buffer.concat(convert.numToVarInt(this.ins.length))
+Transaction.prototype.toBuffer = function () {
+  var txInSize = this.ins.reduce(function(a, x) {
+    return a + (40 + bufferutils.varIntSize(x.script.buffer.length) + x.script.buffer.length)
+  }, 0)
+
+  var txOutSize = this.outs.reduce(function(a, x) {
+    return a + (8 + bufferutils.varIntSize(x.script.buffer.length) + x.script.buffer.length)
+  }, 0)
+
+  var buffer = new Buffer(
+    8 +
+    bufferutils.varIntSize(this.ins.length) +
+    bufferutils.varIntSize(this.outs.length) +
+    txInSize +
+    txOutSize
+  )
+
+  var offset = 0
+  function writeSlice(slice) {
+    if (Array.isArray(slice)) slice = new Buffer(slice) // FIXME: Performance: transitionary only
+    slice.copy(buffer, offset)
+    offset += slice.length
+  }
+  function writeUInt32(i) {
+    buffer.writeUInt32LE(i, offset)
+    offset += 4
+  }
+  function writeUInt64(i) {
+    bufferutils.writeUInt64LE(buffer, i, offset)
+    offset += 8
+  }
+  function writeVarInt(i) {
+    var n = bufferutils.writeVarInt(buffer, i, offset)
+    offset += n
+  }
+
+  writeUInt32(this.version)
+  writeVarInt(this.ins.length)
 
   this.ins.forEach(function(txin) {
-    // Why do blockchain.info, blockexplorer.com, sx and just about everybody
-    // else use little-endian hashes? No idea...
-    buffer = buffer.concat(convert.hexToBytes(txin.outpoint.hash).reverse())
+    var hash = new Buffer(txin.outpoint.hash, 'hex') // FIXME: Performance: convert on tx.addInput instead
 
-    buffer = buffer.concat(convert.numToBytes(parseInt(txin.outpoint.index), 4))
+    // TxHash hex is big-endian, we need little-endian
+    Array.prototype.reverse.call(hash)
 
-    var scriptBytes = txin.script.buffer
-    buffer = buffer.concat(convert.numToVarInt(scriptBytes.length))
-    buffer = buffer.concat(scriptBytes)
-    buffer = buffer.concat(txin.sequence)
+    writeSlice(hash)
+    writeUInt32(txin.outpoint.index)
+    writeVarInt(txin.script.buffer.length)
+    writeSlice(txin.script.buffer)
+    writeUInt32(txin.sequence)
   })
 
-  buffer = buffer.concat(convert.numToVarInt(this.outs.length))
-
+  writeVarInt(this.outs.length)
   this.outs.forEach(function(txout) {
-    buffer = buffer.concat(convert.numToBytes(txout.value,8))
-
-    var scriptBytes = txout.script.buffer
-    buffer = buffer.concat(convert.numToVarInt(scriptBytes.length))
-    buffer = buffer.concat(scriptBytes)
+    writeUInt64(txout.value)
+    writeVarInt(txout.script.buffer.length)
+    writeSlice(txout.script.buffer)
   })
 
-  buffer = buffer.concat(convert.numToBytes(parseInt(this.locktime), 4))
+  writeUInt32(this.locktime)
+  assert.equal(offset, buffer.length, 'Invalid transaction object')
 
   return buffer
 }
 
-Transaction.prototype.serializeHex = function() {
-  return convert.bytesToHex(this.serialize())
+Transaction.prototype.toHex = function() {
+  return this.toBuffer().toString('hex')
 }
 
-//var OP_CODESEPARATOR = 171
-
-var SIGHASH_ALL = 1
-var SIGHASH_NONE = 2
-var SIGHASH_SINGLE = 3
-var SIGHASH_ANYONECANPAY = 80
+var SIGHASH_ALL = 0x01
+var SIGHASH_NONE = 0x02
+var SIGHASH_SINGLE = 0x03
+var SIGHASH_ANYONECANPAY = 0x80
 
 /**
  * Hash transaction for signing a specific input.
@@ -174,62 +203,47 @@ var SIGHASH_ANYONECANPAY = 80
  * hashType, serializes and finally hashes the result. This hash can then be
  * used to sign the transaction input in question.
  */
-Transaction.prototype.hashTransactionForSignature =
-  function (connectedScript, inIndex, hashType)
-{
-  var txTmp = this.clone()
+Transaction.prototype.hashForSignature = function(scriptPubKey, inIndex, hashType) {
+  assert(inIndex >= 0, 'Invalid vin index')
+  assert(inIndex < this.ins.length, 'Invalid vin index')
+  assert(scriptPubKey instanceof Script, 'Invalid Script object')
 
-  // In case concatenating two scripts ends up with two codeseparators,
-  // or an extra one at the end, this prevents all those possible
-  // incompatibilities.
-  /*scriptCode = scriptCode.filter(function (val) {
-    return val !== OP_CODESEPARATOR
-    });*/
+  var txTmp = this.clone()
+  var hashScript = scriptPubKey.without(opcodes.OP_CODESEPARATOR)
 
   // Blank out other inputs' signatures
   txTmp.ins.forEach(function(txin) {
     txin.script = new Script()
   })
+  txTmp.ins[inIndex].script = hashScript
 
-  txTmp.ins[inIndex].script = connectedScript
+  var hashTypeModifier = hashType & 0x1f
+  if (hashTypeModifier === SIGHASH_NONE) {
+    assert(false, 'SIGHASH_NONE not yet supported')
 
-  // Blank out some of the outputs
-  if ((hashType & 0x1f) == SIGHASH_NONE) {
-    txTmp.outs = []
+  } else if (hashTypeModifier === SIGHASH_SINGLE) {
+    assert(false, 'SIGHASH_SINGLE not yet supported')
 
-    // Let the others update at will
-    txTmp.ins.forEach(function(txin, i) {
-      if (i != inIndex) {
-        txTmp.ins[i].sequence = 0
-      }
-    })
-
-  } else if ((hashType & 0x1f) == SIGHASH_SINGLE) {
-    // TODO: Implement
   }
 
-  // Blank out other inputs completely, not recommended for open transactions
   if (hashType & SIGHASH_ANYONECANPAY) {
-    txTmp.ins = [txTmp.ins[inIndex]]
+    assert(false, 'SIGHASH_ANYONECANPAY not yet supported')
   }
 
-  var buffer = txTmp.serialize()
-  buffer = buffer.concat(convert.numToBytes(parseInt(hashType), 4))
+  var hashTypeBuffer = new Buffer(4)
+  hashTypeBuffer.writeInt32LE(hashType, 0)
 
+  var buffer = Buffer.concat([txTmp.toBuffer(), hashTypeBuffer])
   return crypto.hash256(buffer)
 }
 
-/**
- * Calculate and return the transaction's hash.
- * Reverses hash since blockchain.info, blockexplorer.com and others
- * use little-endian hashes for some stupid reason
- */
-Transaction.prototype.getHash = function ()
-{
-  var buffer = this.serialize()
-  var hash = crypto.hash256(buffer)
+Transaction.prototype.getHash = function () {
+  var buffer = crypto.hash256(this.toBuffer())
 
-  return Array.prototype.slice.call(hash).reverse()
+  // Big-endian is used for TxHash
+  Array.prototype.reverse.call(buffer)
+
+  return buffer.toString('hex')
 }
 
 Transaction.prototype.clone = function ()
@@ -249,134 +263,130 @@ Transaction.prototype.clone = function ()
   return newTx
 }
 
-Transaction.deserialize = function(buffer) {
-  if (typeof buffer == "string") {
-    buffer = convert.hexToBytes(buffer)
-  }
-  var pos = 0
-  var readAsInt = function(bytes) {
-    if (bytes === 0) return 0;
-    pos++;
-    return buffer[pos-1] + readAsInt(bytes-1) * 256
-  }
-  var readVarInt = function() {
-    var bytes = buffer.slice(pos, pos + 9) // maximum possible number of bytes to read
-    var result = convert.varIntToNum(bytes)
+Transaction.fromBuffer = function(buffer) {
+  // Copy because we mutate (reverse TxOutHashs)
+  buffer = new Buffer(buffer)
 
-    pos += result.bytes.length
-    return result.number
+  var offset = 0
+  function readSlice(n) {
+    offset += n
+    return buffer.slice(offset - n, offset)
   }
-  var readBytes = function(bytes) {
-    pos += bytes
-    return buffer.slice(pos - bytes, pos)
+  function readUInt32() {
+    var i = buffer.readUInt32LE(offset)
+    offset += 4
+    return i
   }
-  var readVarString = function() {
-    var size = readVarInt()
-    return readBytes(size)
+  function readUInt64() {
+    var i = bufferutils.readUInt64LE(buffer, offset)
+    offset += 8
+    return i
   }
-  var obj = {
-    ins: [],
-    outs: []
+  function readVarInt() {
+    var vi = bufferutils.readVarInt(buffer, offset)
+    offset += vi.size
+    return vi.number
   }
-  obj.version = readAsInt(4)
-  var ins = readVarInt()
-  var i
 
-  for (i = 0; i < ins; i++) {
-    obj.ins.push({
+  var ins = []
+  var outs = []
+
+  var version = readUInt32()
+  var vinLen = readVarInt()
+
+  for (var i = 0; i < vinLen; ++i) {
+    var hash = readSlice(32)
+
+    // TxHash is little-endian, we want big-endian hex
+    Array.prototype.reverse.call(hash)
+
+    var vout = readUInt32()
+    var scriptLen = readVarInt()
+    var script = readSlice(scriptLen)
+    var sequence = readUInt32()
+
+    ins.push({
       outpoint: {
-        hash: convert.bytesToHex(readBytes(32).reverse()),
-        index: readAsInt(4)
+        hash: hash.toString('hex'),
+        index: vout,
       },
-      script: new Script(readVarString()),
-      sequence: readBytes(4)
-    })
-  }
-  var outs = readVarInt()
-
-  for (i = 0; i < outs; i++) {
-    obj.outs.push({
-      value: convert.bytesToNum(readBytes(8)),
-      script: new Script(readVarString())
+      script: Script.fromBuffer(script),
+      sequence: sequence
     })
   }
 
-  obj.locktime = readAsInt(4)
+  var voutLen = readVarInt()
 
-  return new Transaction(obj)
+  for (i = 0; i < voutLen; ++i) {
+    var value = readUInt64()
+    var scriptLen = readVarInt()
+    var script = readSlice(scriptLen)
+
+    outs.push({
+      value: value,
+      script: Script.fromBuffer(script)
+    })
+  }
+
+  var locktime = readUInt32()
+  assert.equal(offset, buffer.length, 'Invalid transaction')
+
+  return new Transaction({
+    version: version,
+    ins: ins,
+    outs: outs,
+    locktime: locktime
+  })
+}
+
+Transaction.fromHex = function(hex) {
+  return Transaction.fromBuffer(new Buffer(hex, 'hex'))
 }
 
 /**
  * Signs a standard output at some index with the given key
- * FIXME: network support is ugly
  */
-Transaction.prototype.sign = function(index, key, type, network) {
+Transaction.prototype.sign = function(index, key, type) {
   assert(key instanceof ECKey)
-  network = network || Network.bitcoin
 
-  var address = key.pub.getAddress(network.pubKeyHash)
-
-  // FIXME: Assumed prior TX was pay-to-pubkey-hash
-  var script = Script.createOutputScript(address, network)
+  var script = key.pub.getAddress().toScriptPubKey()
   var signature = this.signScriptSig(index, script, key, type)
 
+  // FIXME: Assumed prior TX was pay-to-pubkey-hash
   var scriptSig = Script.createPubKeyHashScriptSig(signature, key.pub)
   this.setScriptSig(index, scriptSig)
 }
 
-// Takes outputs of the form [{ output: 'txhash:index', address: 'address' },...]
-Transaction.prototype.signWithKeys = function(keys, outputs, type) {
+Transaction.prototype.signScriptSig = function(index, scriptPubKey, key, type) {
   type = type || SIGHASH_ALL
-
-  var addrdata = keys.map(function(key) {
-    assert(key instanceof ECKey)
-
-    return {
-      key: key,
-      address: key.getAddress().toString()
-    }
-  })
-
-  var hmap = {}
-  outputs.forEach(function(o) {
-    hmap[o.output] = o
-  })
-
-  for (var i = 0; i < this.ins.length; i++) {
-    var outpoint = this.ins[i].outpoint.hash + ':' + this.ins[i].outpoint.index
-    var histItem = hmap[outpoint]
-
-    if (!histItem) continue;
-
-    var thisInputAddrdata = addrdata.filter(function(a) {
-      return a.address == histItem.address
-    })
-
-    if (thisInputAddrdata.length === 0) continue;
-
-    this.sign(i,thisInputAddrdata[0].key)
-  }
-}
-
-Transaction.prototype.signScriptSig = function(index, script, key, type) {
-  type = type || SIGHASH_ALL
+<<<<<<< HEAD
 
   assert((index >= 0), 'Invalid vin index')
   assert(script instanceof Script, 'Invalid Script object')
+=======
+>>>>>>> ad9a73a81b68499fe2dc07bd30c1c546e81f504a
   assert(key instanceof ECKey, 'Invalid private key')
-//  assert.equal(type & 0x7F, type, 'Invalid type') // TODO
 
-  var hash = this.hashTransactionForSignature(script, index, type)
-  return key.sign(hash).concat([type])
+  var hash = this.hashForSignature(scriptPubKey, index, type)
+  var signature = key.sign(hash)
+  var DERencoded = ecdsa.serializeSig(signature)
+
+  return Buffer.concat([
+    new Buffer(DERencoded),
+    new Buffer([type])
+  ])
 }
 
 Transaction.prototype.setScriptSig = function(index, script) {
   this.ins[index].script = script
 }
 
-Transaction.prototype.validateSig = function(index, script, pub, sig, type) {
-  type = type || SIGHASH_ALL
-  var hash = this.hashTransactionForSignature(script, index, type)
+Transaction.prototype.validateSig = function(index, script, pub, DERsig) {
+  var type = DERsig.readUInt8(DERsig.length - 1)
+  DERsig = DERsig.slice(0, -1)
+
+  var hash = this.hashForSignature(script, index, type)
+  var sig = ecdsa.parseSig(DERsig)
 
   return pub.verify(hash, sig)
 }
@@ -402,15 +412,9 @@ var TransactionIn = function (data) {
     this.outpoint = { hash: data.hash, index: data.index }
   }
 
-  if (data.scriptSig) {
-    this.script = Script.fromScriptSig(data.scriptSig)
-  } else if (data.script) {
-    this.script = data.script
-  } else {
-    this.script = new Script(data.script)
-  }
-
-  this.sequence = data.sequence || this.defaultSequence
+  assert(data.script, 'Invalid TxIn parameters')
+  this.script = data.script
+  this.sequence = data.sequence == undefined ? DEFAULT_SEQUENCE : data.sequence
 }
 
 TransactionIn.prototype.clone = function () {
@@ -424,35 +428,20 @@ TransactionIn.prototype.clone = function () {
   })
 }
 
-// FIXME: Support for alternate networks
-var TransactionOut = function (data) {
-  this.script =
-      data.script instanceof Script    ? data.script.clone()
-    : Array.isArray(data.script)       ? new Script(data.script)
-    : typeof data.script == "string"   ? new Script(convert.hexToBytes(data.script))
-    : data.scriptPubKey                ? Script.fromScriptSig(data.scriptPubKey)
-    : data.address                     ? Script.createOutputScript(data.address)
-    : new Script()
+function TransactionOut(data) {
+  this.script = data.script
+  this.value = data.value
+  this.address = data.address
 
-  if (this.script.buffer.length > 0) this.address = this.script.getToAddress();
-
-  this.value =
-      Array.isArray(data.value)        ? convert.bytesToNum(data.value)
-    : "string" == typeof data.value    ? parseInt(data.value)
-    : data.value instanceof BigInteger ? parseInt(data.value.toString())
-    : data.value
+  if (data.address) this.address = data.address
 }
 
 TransactionOut.prototype.clone = function() {
-  var newTxout = new TransactionOut({
+  return new TransactionOut({
     script: this.script.clone(),
-    value: this.value
+    value: this.value,
+    address: this.address
   })
-  return newTxout
-}
-
-TransactionOut.prototype.scriptPubKey = function() {
-  return convert.bytesToHex(this.script.buffer)
 }
 
 module.exports = {

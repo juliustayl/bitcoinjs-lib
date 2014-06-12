@@ -1,26 +1,25 @@
-var ec = require('./ec')
-var Key = require('./eckey')
 var T = require('./transaction')
 
 module.exports = {
   Address: require('./address'),
   base58: require('./base58'),
   base58check: require('./base58check'),
+<<<<<<< HEAD
+=======
+  bufferutils: require('./bufferutils'),
+>>>>>>> ad9a73a81b68499fe2dc07bd30c1c546e81f504a
   convert: require('./convert'),
   crypto: require('./crypto'),
-  ec: ec,
   ecdsa: require('./ecdsa'),
-  ECKey: Key.ECKey,
-  ECPointFp: ec.ECPointFp,
-  ECPubKey: Key.ECPubKey,
+  ECKey: require('./eckey'),
+  ECPubKey: require('./ecpubkey'),
   Message: require('./message'),
-  Opcode: require('./opcode'),
-  HDWallet: require('./hdwallet'),
+  opcodes: require('./opcodes'),
+  HDNode: require('./hdnode'),
   Script: require('./script'),
-  sec: require('./sec'),
   Transaction: T.Transaction,
   TransactionIn: T.TransactionIn,
   TransactionOut: T.TransactionOut,
-  network: require('./network'),
+  networks: require('./networks'),
   Wallet: require('./wallet')
 }

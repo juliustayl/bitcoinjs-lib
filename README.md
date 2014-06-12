@@ -21,12 +21,12 @@ This is not the original bitcoinjs-lib that was not updated for a long time.
 
 ## Features
 
-- Bitcoin Testnet and Mainnet (production) support
-- [HD Wallets](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki)
+- Default's to the Bitcoin network, however testnet, Dogecoin and Litecoin are all supported natively.
+- [HD Wallets](https://github.com/bitcoin/bips/blob/master/bip-0032.mediawiki).
 - Random private key generation that uses [window.crypto.getRandomValues](https://developer.mozilla.org/en-US/docs/Web/API/Window.crypto) in the underlying implementation.
-- ECDSA signing and verification
-- Standard Transaction creation (pay-to-pubkey-hash), support for multisignature transactions
-- A (somewhat incomplete) wallet implementation, improvements ongoing
+- ECDSA signing and verification.
+- Standard transaction creation, with support for PubKeyHash, ScriptHash, MultiSig and PubKey scripts, and
+- A (somewhat incomplete) wallet implementation, with improvements ongoing.
 
 
 ## Installation
@@ -53,7 +53,7 @@ Compile `bitcoinjs-min.js` with the following command:
 
     $ npm run-script compile
 
-After loading this file in your browser, you will be able to use the global `Bitcoin` object.
+After loading this file in your browser, you will be able to use the global `bitcoin` object.
 
 
 ## Usage
@@ -65,21 +65,21 @@ These examples assume you are running bitcoinjs-lib in the browser.
 
 ```javascript
 
-key = Bitcoin.ECKey.makeRandom()
+key = bitcoin.ECKey.makeRandom()
 
-// Print your private key (a hex string)
-console.log(key.toString())
+// Print your private key (in WIF format)
+console.log(key.toWIF())
 // => 8c112cf628362ecf4d482f68af2dbb50c8a2cb90d226215de925417aa9336a48
 
-// Print your public key (defaults to a Bitcoin address)
-console.log(key.pub.getAddress())
+// Print your public key (toString defaults to a Bitcoin address)
+console.log(key.pub.getAddress().toString())
 // => 14bZ7YWde4KdRb5YN7GYkToz3EHVCvRxkF
 ```
 
 ### Creating a Transaction
 
 ```javascript
-tx = new Bitcoin.Transaction()
+tx = new bitcoin.Transaction()
 
 // Add the input (who is paying) of the form [previous transaction hash, index of the output to use]
 tx.addInput("aa94ab02c182214f090e99a0d57021caffd0f195a81c24602b1028b130b63e31", 0)
@@ -87,8 +87,8 @@ tx.addInput("aa94ab02c182214f090e99a0d57021caffd0f195a81c24602b1028b130b63e31", 
 // Add the output (who to pay to) of the form [payee's address, amount in satoshis]
 tx.addOutput("1Gokm82v6DmtwKEB8AiVhm82hyFSsEvBDK", 15000)
 
-// Initialize a private key using hex
-key = Bitcoin.ECKey.fromHex("8c112cf628362ecf4d482f68af2dbb50c8a2cb90d226215de925417aa9336a48")
+// Initialize a private key using WIF
+key = bitcoin.ECKey.fromWIF("L1uyy5qTuGrVXrmrsvHWHgVzW9kKdrp27wBC7Vs6nZDTF2BRUVwy")
 
 // Sign the first input with the new key
 tx.sign(0, key)
@@ -108,6 +108,7 @@ console.log(tx.serializeHex())
 - [Coinpunk](https://coinpunk.com)
 - [DarkWallet](https://darkwallet.unsystem.net)
 - [GreenAddress](https://greenaddress.it)
+- [Dogechain Wallet](https://dogechain.info)
 
 Feel free to send pull requests to have your project/startup listed here.
 

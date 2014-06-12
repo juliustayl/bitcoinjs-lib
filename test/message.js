@@ -1,93 +1,63 @@
 var assert = require('assert')
-var ECKey = require('../src/eckey').ECKey
-var Message = require('../').Message
-var network = require('../').network
+var networks = require('../src/networks')
 
-var fixtures = require('./fixtures/message')
+var BigInteger = require('bigi')
+var ECKey = require('../src/eckey')
+var Message = require('../src/message')
+
+var fixtures = require('./fixtures/message.json')
 
 describe('Message', function() {
-  var msg
-
-  beforeEach(function() {
-    msg = 'vires is numeris'
-  })
-
   describe('magicHash', function() {
-    it('matches the test vectors', function() {
-      fixtures.magicHash.forEach(function(f) {
-        var actual = Message.magicHash(f.message)
-        var expected = f.hash256
+    fixtures.valid.magicHash.forEach(function(f) {
+      it('produces the correct magicHash for \"' + f.message + '\" (' + f.network + ')', function() {
+        var network = networks[f.network]
+        var actual = Message.magicHash(f.message, network)
 
-        assert.equal(actual.toString('hex'), expected)
+        assert.equal(actual.toString('hex'), f.magicHash)
       })
     })
   })
 
   describe('verify', function() {
-    var addr, sig, caddr, csig
+    fixtures.valid.verify.forEach(function(f) {
+      it('verifies a valid signature for \"' + f.message + '\" (' + f.network + ')', function() {
+        var network = networks[f.network]
 
-    beforeEach(function() {
-      addr = '16UwLL9Risc3QfPqBUvKofHmBQ7wMtjvM' // uncompressed
-      caddr = '1PMycacnJaSqwwJqjawXBErnLsZ7RkXUAs' // compressed
+        var signature = new Buffer(f.signature, 'base64')
+        assert.ok(Message.verify(f.address, signature, f.message, network))
 
-      sig = new Buffer('1bc25ac0fb503abc9bad23f558742740fafaec1f52deaaf106b9759a5ce84c93921c4a669c5ec3dfeb7e2d7d177a2f49db407900874f6de2f701a4c16783776d8d', 'hex')
-      csig = new Buffer('1fc25ac0fb503abc9bad23f558742740fafaec1f52deaaf106b9759a5ce84c93921c4a669c5ec3dfeb7e2d7d177a2f49db407900874f6de2f701a4c16783776d8d', 'hex')
+        if (f.compressed) {
+          var compressedSignature = new Buffer(f.compressed.signature, 'base64')
+
+          assert.ok(Message.verify(f.compressed.address, compressedSignature, f.message, network))
+        }
+      })
     })
 
-    it('can verify a signed message', function() {
-      assert.ok(Message.verify(addr, sig, msg))
-      assert.ok(Message.verify(caddr, csig, msg))
-    })
-
-    it('will fail for the wrong message', function() {
-      assert.ok(!Message.verify(addr, sig, 'foobar'))
-      assert.ok(!Message.verify(caddr, csig, 'foobar'))
-    })
-
-    it('will fail for the wrong public key', function() {
-      assert.ok(!Message.verify('1MsHWS1BnwMc3tLE8G35UXsS58fKipzB7a', sig, msg))
-      assert.ok(!Message.verify('1Q1pE5vPGEEMqRcVRMbtBK842Y6Pzo6nK9', csig, msg))
-    })
-
-    it('supports alternate network addresses', function() {
-      var taddr = 'mxnQZKxSKjzaMgrdXzk35rif3u62TLDrg9'
-      var tsig = new Buffer('IGucnrTku3KLCCHUMwq9anawfrlN8RK1HWMN+10LhsHJeysBdWfj5ohJcS/+oqrlVFNvEgbgEeAQUL6r3sZwnj8=', 'base64')
-
-      assert.ok(Message.verify(taddr, tsig, msg))
-      assert.ok(!Message.verify(taddr, tsig, 'foobar'))
-    })
-
-    it('does not cross verify (compressed/uncompressed)', function() {
-      assert.ok(!Message.verify(addr, csig, msg))
-      assert.ok(!Message.verify(caddr, sig, msg))
+    fixtures.invalid.verify.forEach(function(f) {
+      it(f.description, function() {
+        var signature = new Buffer(f.signature, 'base64')
+        assert.ok(!Message.verify(f.address, signature, f.message))
+      })
     })
   })
 
   describe('signing', function() {
-    describe('using the uncompressed public key', function(){
-      it('gives same signature as a compressed public key', function() {
-        var key = ECKey.makeRandom(false) // uncompressed
-        var sig = Message.sign(key, msg)
+    fixtures.valid.signing.forEach(function(f) {
+      it(f.description, function() {
+        var network = networks[f.network]
 
-        var compressedKey = new ECKey(key.D, true) // compressed clone
-        var csig = Message.sign(compressedKey, msg)
+        var privKey = new ECKey(new BigInteger(f.d), false)
+        var signature = Message.sign(privKey, f.message, network)
+        assert.equal(signature.toString('base64'), f.signature)
 
-        var addr = key.pub.getAddress()
-        var caddr = compressedKey.pub.getAddress()
-        assert.ok(Message.verify(addr, sig, msg))
-        assert.ok(Message.verify(caddr, csig, msg))
-        assert.notDeepEqual(sig.slice(0, 2), csig.slice(0, 2)) // unequal compression flags
-        assert.deepEqual(sig.slice(2), csig.slice(2)) // equal signatures
-      })
-    })
+        if (f.compressed) {
+          var compressedPrivKey = new ECKey(new BigInteger(f.d))
+          var compressedSignature = Message.sign(compressedPrivKey, f.message)
 
-    describe('testnet address', function(){
-      it('works', function(){
-        var key = ECKey.makeRandom()
-        var sig = Message.sign(key, msg)
-
-        var addr = key.pub.getAddress(network.testnet.pubKeyHash)
-        assert(Message.verify(addr, sig, msg))
+          assert.equal(compressedSignature.toString('base64'), f.compressed.signature)
+        }
       })
     })
   })
